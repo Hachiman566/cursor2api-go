@@ -20,13 +20,16 @@ COPY . .
 RUN HTTP_PROXY="" HTTPS_PROXY="" http_proxy="" https_proxy="" \
     CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o cursor2api-go .
 
-# 运行阶段
-FROM node:alpine
+# 运行阶段 - 使用 Debian 基础镜像获得更好的 TLS 支持
+FROM node:20-slim
 
-# 创建非 root 用户
-RUN adduser -D -g '' appuser
+# 安装 ca-certificates
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /root/
+# 创建非 root 用户 (不指定特定 UID)
+RUN useradd -m appuser
+
+WORKDIR /home/appuser
 
 # 从构建阶段复制二进制文件
 COPY --from=builder /app/cursor2api-go .
@@ -36,7 +39,7 @@ COPY --from=builder /app/static ./static
 COPY --from=builder /app/jscode ./jscode
 
 # 更改所有者
-RUN chown -R appuser:appuser /root/
+RUN chown -R appuser:appuser /home/appuser
 
 # 切换到非root用户
 USER appuser
@@ -46,7 +49,7 @@ EXPOSE 8002
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget -qO- http://localhost:8002/health || exit 1
+    CMD curl -sf http://localhost:8002/health || exit 1
 
 # 启动应用
 CMD ["./cursor2api-go"]
