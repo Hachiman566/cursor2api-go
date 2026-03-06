@@ -7,7 +7,7 @@ type AnthropicRequest struct {
 	Model       string             `json:"model" binding:"required"`
 	MaxTokens   int                `json:"max_tokens" binding:"required"`
 	Messages    []AnthropicMessage `json:"messages" binding:"required"`
-	System      string             `json:"system,omitempty"`
+	System      interface{}        `json:"system,omitempty"` // string or []AnthropicContentBlock
 	Stream      bool               `json:"stream,omitempty"`
 	Temperature *float64           `json:"temperature,omitempty"`
 	TopP        *float64           `json:"top_p,omitempty"`
@@ -56,9 +56,32 @@ func (m *AnthropicMessage) GetStringContent() string {
 // ToOpenAIMessages 将 Anthropic 消息列表转换为 OpenAI 格式
 func (r *AnthropicRequest) ToOpenAIMessages() []Message {
 	var messages []Message
-	if r.System != "" {
-		messages = append(messages, Message{Role: "system", Content: r.System})
+
+	// 处理 system 字段（可能是字符串或数组）
+	if r.System != nil {
+		switch v := r.System.(type) {
+		case string:
+			if v != "" {
+				messages = append(messages, Message{Role: "system", Content: v})
+			}
+		case []interface{}:
+			// system 是数组格式，提取所有 text 内容
+			var systemText string
+			for _, item := range v {
+				if block, ok := item.(map[string]interface{}); ok {
+					if block["type"] == "text" {
+						if text, ok := block["text"].(string); ok {
+							systemText += text
+						}
+					}
+				}
+			}
+			if systemText != "" {
+				messages = append(messages, Message{Role: "system", Content: systemText})
+			}
+		}
 	}
+
 	for _, m := range r.Messages {
 		messages = append(messages, Message{Role: m.Role, Content: m.GetStringContent()})
 	}
