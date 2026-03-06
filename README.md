@@ -26,7 +26,19 @@
 
 ## 🤖 支持的模型
 
-- **Anthropic Claude**: claude-sonnet-4.6
+默认支持：
+- **Anthropic Claude**: `claude-3.5-sonnet`
+
+通过环境变量 `MODELS` 可扩展支持更多模型名称（实际都转发到 Cursor）：
+```bash
+export MODELS="claude-3.5-sonnet,claude-sonnet-4-6,claude-sonnet-4.6,gpt-4o"
+```
+
+常用模型名别名：
+- `claude-3.5-sonnet`（默认）
+- `claude-sonnet-4-6`（连字符格式）
+- `claude-sonnet-4.6`（点号格式，兼容 Claude Code）
+- `gpt-4o`（OpenAI 格式）
 
 ## 🚀 快速开始
 
@@ -89,24 +101,78 @@ go run main.go
 
 1. **构建镜像**:
 ```bash
-# 构建镜像
 docker build -t cursor2api-go .
 ```
 
 2. **运行容器**:
+
+**基础运行**（使用默认配置）:
 ```bash
-# 运行容器（推荐）
+docker run -d \
+  --name cursor2api-go \
+  --restart unless-stopped \
+  -p 8002:8002 \
+  cursor2api-go
+```
+
+**完整配置**（推荐生产环境）:
+```bash
 docker run -d \
   --name cursor2api-go \
   --restart unless-stopped \
   -p 8002:8002 \
   -e API_KEY=your-secret-key \
   -e DEBUG=false \
+  -e MODELS="claude-3.5-sonnet,claude-sonnet-4-6,claude-sonnet-4.6,gpt-4o" \
+  -e TIMEOUT=60 \
   cursor2api-go
-
-# 或者使用默认配置运行
-docker run -d --name cursor2api-go --restart unless-stopped -p 8002:8002 cursor2api-go
 ```
+
+**清除代理**（避免容器内无法访问宿主机代理）:
+```bash
+docker run -d \
+  --name cursor2api-go \
+  --restart unless-stopped \
+  -p 8002:8002 \
+  -e HTTP_PROXY="" \
+  -e HTTPS_PROXY="" \
+  -e http_proxy="" \
+  -e https_proxy="" \
+  -e MODELS="claude-3.5-sonnet,claude-sonnet-4-6,claude-sonnet-4.6,gpt-4o" \
+  cursor2api-go
+```
+
+**常用命令**:
+```bash
+# 查看日志
+docker logs -f cursor2api-go
+
+# 停止容器
+docker stop cursor2api-go
+
+# 启动已停止的容器
+docker start cursor2api-go
+
+# 删除并重新创建
+docker rm -f cursor2api-go && docker run -d ...
+
+# 查看运行状态
+docker ps | grep cursor2api-go
+```
+
+**环境变量说明**:
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `PORT` | `8002` | 服务端口 |
+| `API_KEY` | `0000` | API 认证密钥 |
+| `DEBUG` | `false` | 调试模式 |
+| `MODELS` | `claude-sonnet-4-6` | 支持的模型列表（逗号分隔） |
+| `TIMEOUT` | `60` | 请求超时时间（秒） |
+| `HTTP_PROXY` | - | HTTP 代理（容器内通常需清空） |
+| `HTTPS_PROXY` | - | HTTPS 代理（容器内通常需清空） |
+
+> **注意**: 如果宿主机使用了本地代理（如 Clash、V2Ray 监听在 `127.0.0.1:7890`），容器内无法访问该代理。建议设置 `HTTP_PROXY=""` 等环境变量让容器直连外网，或配置代理监听 `0.0.0.0` 并使用 `host.docker.internal:7890`。
 
 ### Docker Compose 部署（推荐用于生产环境）
 
@@ -204,6 +270,50 @@ curl -X POST http://localhost:8002/v1/chat/completions \
     "stream": true
   }'
 ```
+
+### Anthropic 格式接口（供 Claude Code 使用）
+
+本服务同时兼容 Anthropic API 格式，可直接配置 Claude Code 使用：
+
+```bash
+# 非流式请求
+curl -X POST http://localhost:8002/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: 0000" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-sonnet-4.6",
+    "max_tokens": 100,
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+
+# 流式请求
+curl -X POST http://localhost:8002/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: 0000" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-sonnet-4.6",
+    "max_tokens": 100,
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "stream": true
+  }'
+```
+
+**Claude Code 配置**:
+```bash
+export ANTHROPIC_API_KEY=0000
+export ANTHROPIC_BASE_URL=http://localhost:8002
+claude
+```
+
+或使用配置命令（永久生效）:
+```bash
+claude config set --global apiKey 0000
+claude config set --global apiBaseUrl http://localhost:8002
+```
+
+> **注意**: 需要在 `MODELS` 中添加 `claude-sonnet-4.6` 等模型名，否则会返回模型不存在错误。
 
 ### 在第三方应用中使用
 
