@@ -83,6 +83,47 @@ DEBUG=true ./cursor2api-go
 - 重试次数
 - 详细的错误信息
 
+## Docker 部署常见问题
+
+### 问题 1：apk 无法连接到 Alpine 包仓库
+
+**现象**:
+```
+WARNING: fetching https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/APKINDEX.tar.gz: Connection refused
+ERROR: unable to select packages: git (no such package)
+```
+
+**原因**: Docker 构建环境无法访问 Alpine CDN（网络限制或代理问题）。
+
+**解决方案**: 已在 Dockerfile 中修复：
+- 构建阶段改用 `golang:1.24`（Debian 基础镜像），内置 git 和 ca-certificates，无需 `apk` 安装
+- 运行阶段改用 `node:alpine`（内置 Node.js、npm、ca-certificates），无需任何 `apk` 命令
+
+---
+
+### 问题 2：go mod download 失败，提示 proxyconnect 连接拒绝
+
+**现象**:
+```
+go: github.com/andybalholm/brotli@v1.2.0: Get "https://proxy.golang.org/...":
+proxyconnect tcp: dial tcp 127.0.0.1:7890: connect: connection refused
+```
+
+**原因**: 宿主机设置了 HTTP 代理（如 Clash、V2Ray 等监听在 `127.0.0.1:7890`），Docker BuildKit 会自动将宿主机的 `HTTP_PROXY`/`HTTPS_PROXY` 注入到构建过程中，容器内无法访问宿主机的本地代理。
+
+**解决方案**: 在 Dockerfile 的 `RUN` 命令中内联清除代理，并设置国内 Go 模块代理：
+```dockerfile
+ENV GOPROXY=https://goproxy.cn,https://proxy.golang.org,direct
+
+RUN HTTP_PROXY="" HTTPS_PROXY="" http_proxy="" https_proxy="" go mod download
+RUN HTTP_PROXY="" HTTPS_PROXY="" http_proxy="" https_proxy="" \
+    CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o cursor2api-go .
+```
+
+> **注意**: 在 Dockerfile 中用 `ENV HTTP_PROXY=""` 无效，BuildKit 预定义的代理参数优先级更高，必须在 `RUN` 命令内联覆盖。
+
+---
+
 ## 其他常见问题
 
 ### Cloudflare 403 错误
