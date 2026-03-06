@@ -97,7 +97,7 @@ ERROR: unable to select packages: git (no such package)
 
 **解决方案**: 已在 Dockerfile 中修复：
 - 构建阶段改用 `golang:1.24`（Debian 基础镜像），内置 git 和 ca-certificates，无需 `apk` 安装
-- 运行阶段改用 `node:alpine`（内置 Node.js、npm、ca-certificates），无需任何 `apk` 命令
+- 运行阶段改用 `node:20-slim`（Debian，内置 Node.js），无需任何 `apk` 命令
 
 ---
 
@@ -121,6 +121,29 @@ RUN HTTP_PROXY="" HTTPS_PROXY="" http_proxy="" https_proxy="" \
 ```
 
 > **注意**: 在 Dockerfile 中用 `ENV HTTP_PROXY=""` 无效，BuildKit 预定义的代理参数优先级更高，必须在 `RUN` 命令内联覆盖。
+
+---
+
+### 问题 3：容器内访问 cursor.com 失败 (SSL EOF / TLS 握手错误)
+
+**现象**:
+```
+error="Post \"https://cursor.com/api/chat\": EOF"
+# 或
+SSL connection using TLSv1.3 / UNDEF
+```
+
+**原因**: Alpine Linux 使用 musl libc 和较老的 OpenSSL，与 `req` 库的 TLS 指纹模拟 (`ImpersonateChrome()`) 不兼容。
+
+**解决方案**: 使用 Debian 基础镜像（已在当前 Dockerfile 中修复）：
+```dockerfile
+# 改用 node:20-slim (Debian)
+FROM node:20-slim
+
+RUN apt-get update && apt-get install -y ca-certificates
+```
+
+> 注：切换到 Debian 后容器可直接访问 cursor.com，无需代理。
 
 ---
 
