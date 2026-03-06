@@ -29,6 +29,48 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// AnthropicAuthRequired Anthropic 格式认证中间件（支持 x-api-key 头）
+func AnthropicAuthRequired() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		expectedToken := os.Getenv("API_KEY")
+		if expectedToken == "" {
+			expectedToken = "0000"
+		}
+
+		// 优先检查 x-api-key
+		token := c.GetHeader("x-api-key")
+		if token == "" {
+			// 兜底检查 Authorization: Bearer
+			authHeader := c.GetHeader("Authorization")
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				token = strings.TrimPrefix(authHeader, "Bearer ")
+			}
+		}
+
+		if token == "" {
+			c.JSON(http.StatusUnauthorized, models.NewErrorResponse(
+				"Missing API key. Provide via x-api-key header.",
+				"authentication_error",
+				"missing_auth",
+			))
+			c.Abort()
+			return
+		}
+
+		if token != expectedToken {
+			c.JSON(http.StatusUnauthorized, models.NewErrorResponse(
+				"Invalid API key",
+				"authentication_error",
+				"invalid_api_key",
+			))
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
 // AuthRequired 认证中间件
 func AuthRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {

@@ -107,6 +107,9 @@ func setupRoutes(router *gin.Engine, handler *handlers.Handler) {
 
 		// 聊天完成
 		v1.POST("/chat/completions", middleware.AuthRequired(), handler.ChatCompletions)
+
+		// Anthropic 格式接口（供 Claude Code 使用）
+		v1.POST("/messages", middleware.AnthropicAuthRequired(), handler.AnthropicMessages)
 	}
 
 	// 静态文件服务（如果需要）

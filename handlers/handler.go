@@ -254,6 +254,55 @@ func (h *Handler) ChatCompletions(c *gin.Context) {
 	}
 }
 
+// AnthropicMessages 处理 Anthropic /v1/messages 请求
+func (h *Handler) AnthropicMessages(c *gin.Context) {
+	var req models.AnthropicRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logrus.WithError(err).Error("Failed to bind Anthropic request")
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
+			"Invalid request format",
+			"invalid_request_error",
+			"invalid_json",
+		))
+		return
+	}
+
+	if !h.config.IsValidModel(req.Model) {
+		c.JSON(http.StatusBadRequest, models.NewErrorResponse(
+			"Invalid model specified",
+			"invalid_request_error",
+			"model_not_found",
+		))
+		return
+	}
+
+	// 转换为内部 OpenAI 格式
+	oaiReq := models.ChatCompletionRequest{
+		Model:       req.Model,
+		Messages:    req.ToOpenAIMessages(),
+		Stream:      req.Stream,
+		Temperature: req.Temperature,
+		TopP:        req.TopP,
+	}
+	if req.MaxTokens > 0 {
+		oaiReq.MaxTokens = &req.MaxTokens
+	}
+	oaiReq.MaxTokens = models.ValidateMaxTokens(req.Model, oaiReq.MaxTokens)
+
+	chatGenerator, err := h.cursorService.ChatCompletion(c.Request.Context(), &oaiReq)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to create Anthropic chat completion")
+		middleware.HandleError(c, err)
+		return
+	}
+
+	if req.Stream {
+		utils.SafeStreamWrapper(utils.StreamAnthropicMessages, c, chatGenerator, req.Model)
+	} else {
+		utils.NonStreamAnthropicMessages(c, chatGenerator, req.Model)
+	}
+}
+
 // ServeDocs 服务API文档页面
 func (h *Handler) ServeDocs(c *gin.Context) {
 	c.Data(http.StatusOK, "text/html; charset=utf-8", h.docsContent)

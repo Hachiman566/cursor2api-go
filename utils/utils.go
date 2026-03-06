@@ -63,6 +63,130 @@ func GenerateRandomString(length int) string {
 	return encoded[:length]
 }
 
+// StreamAnthropicMessages 以 Anthropic SSE 格式输出流式响应
+func StreamAnthropicMessages(c *gin.Context, chatGenerator <-chan interface{}, modelName string) {
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Access-Control-Allow-Origin", "*")
+
+	msgID := "msg_" + GenerateRandomString(24)
+	ctx := c.Request.Context()
+
+	// message_start
+	startData, _ := json.Marshal(models.AnthropicStreamMessageStart{
+		Type: "message_start",
+		Message: models.AnthropicStreamStartMsg{
+			ID:           msgID,
+			Type:         "message",
+			Role:         "assistant",
+			Content:      []interface{}{},
+			Model:        modelName,
+			StopReason:   nil,
+			StopSequence: nil,
+			Usage:        models.AnthropicUsage{InputTokens: 0, OutputTokens: 0},
+		},
+	})
+	WriteSSEEvent(c.Writer, "message_start", string(startData))
+
+	// content_block_start
+	blockStartData, _ := json.Marshal(models.AnthropicContentBlockStart{
+		Type:         "content_block_start",
+		Index:        0,
+		ContentBlock: models.AnthropicContentBlock{Type: "text", Text: ""},
+	})
+	WriteSSEEvent(c.Writer, "content_block_start", string(blockStartData))
+
+	// ping
+	pingData, _ := json.Marshal(models.AnthropicPing{Type: "ping"})
+	WriteSSEEvent(c.Writer, "ping", string(pingData))
+
+	var outputTokens int
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case data, ok := <-chatGenerator:
+			if !ok {
+				// content_block_stop
+				blockStopData, _ := json.Marshal(models.AnthropicContentBlockStop{Type: "content_block_stop", Index: 0})
+				WriteSSEEvent(c.Writer, "content_block_stop", string(blockStopData))
+
+				// message_delta
+				msgDeltaData, _ := json.Marshal(models.AnthropicMessageDelta{
+					Type:  "message_delta",
+					Delta: models.AnthropicMessageDeltaData{StopReason: "end_turn", StopSequence: nil},
+					Usage: models.AnthropicUsage{OutputTokens: outputTokens},
+				})
+				WriteSSEEvent(c.Writer, "message_delta", string(msgDeltaData))
+
+				// message_stop
+				msgStopData, _ := json.Marshal(models.AnthropicMessageStop{Type: "message_stop"})
+				WriteSSEEvent(c.Writer, "message_stop", string(msgStopData))
+				return
+			}
+			switch v := data.(type) {
+			case string:
+				if v != "" {
+					deltaData, _ := json.Marshal(models.AnthropicContentBlockDelta{
+						Type:  "content_block_delta",
+						Index: 0,
+						Delta: models.AnthropicTextDelta{Type: "text_delta", Text: v},
+					})
+					WriteSSEEvent(c.Writer, "content_block_delta", string(deltaData))
+				}
+			case models.Usage:
+				outputTokens = v.CompletionTokens
+			case error:
+				logrus.WithError(v).Error("Anthropic stream error")
+				return
+			}
+		}
+	}
+}
+
+// NonStreamAnthropicMessages 以 Anthropic 格式返回非流式响应
+func NonStreamAnthropicMessages(c *gin.Context, chatGenerator <-chan interface{}, modelName string) {
+	var fullContent strings.Builder
+	var usage models.Usage
+
+	ctx := c.Request.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			c.JSON(http.StatusRequestTimeout, models.NewErrorResponse("Request timeout", "timeout_error", "request_timeout"))
+			return
+		case data, ok := <-chatGenerator:
+			if !ok {
+				resp := models.AnthropicResponse{
+					ID:           "msg_" + GenerateRandomString(24),
+					Type:         "message",
+					Role:         "assistant",
+					Content:      []models.AnthropicContentBlock{{Type: "text", Text: fullContent.String()}},
+					Model:        modelName,
+					StopReason:   "end_turn",
+					StopSequence: nil,
+					Usage: models.AnthropicUsage{
+						InputTokens:  usage.PromptTokens,
+						OutputTokens: usage.CompletionTokens,
+					},
+				}
+				c.JSON(http.StatusOK, resp)
+				return
+			}
+			switch v := data.(type) {
+			case string:
+				fullContent.WriteString(v)
+			case models.Usage:
+				usage = v
+			case error:
+				middleware.HandleError(c, v)
+				return
+			}
+		}
+	}
+}
+
 // GenerateChatCompletionID 生成聊天完成ID
 func GenerateChatCompletionID() string {
 	return "chatcmpl-" + GenerateRandomString(29)
