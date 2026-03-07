@@ -16,7 +16,7 @@ type AnthropicRequest struct {
 // AnthropicMessage Anthropic 消息
 type AnthropicMessage struct {
 	Role    string      `json:"role"`
-	Content interface{} `json:"content"` // string or []AnthropicContentBlock
+	Content interface{} `json:"content"` // string or []AnthropicContentBlock or []interface{}
 }
 
 // AnthropicContentBlock Anthropic 内容块
@@ -36,11 +36,18 @@ func (m *AnthropicMessage) GetStringContent() string {
 	case []interface{}:
 		var result string
 		for _, item := range v {
+			// 处理 map[string]interface{} 格式
 			if block, ok := item.(map[string]interface{}); ok {
 				if block["type"] == "text" {
 					if text, ok := block["text"].(string); ok {
 						result += text
 					}
+				}
+			}
+			// 处理 AnthropicContentBlock 格式
+			if block, ok := item.(AnthropicContentBlock); ok {
+				if block.Type == "text" {
+					result += block.Text
 				}
 			}
 		}
@@ -82,8 +89,12 @@ func (r *AnthropicRequest) ToOpenAIMessages() []Message {
 		}
 	}
 
+	// 转换消息，过滤掉空内容的消息
 	for _, m := range r.Messages {
-		messages = append(messages, Message{Role: m.Role, Content: m.GetStringContent()})
+		content := m.GetStringContent()
+		if content != "" {
+			messages = append(messages, Message{Role: m.Role, Content: content})
+		}
 	}
 	return messages
 }
