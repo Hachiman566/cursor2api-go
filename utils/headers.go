@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math/rand"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -164,6 +165,30 @@ func (g *HeaderGenerator) GetChatHeaders(xIsHuman string) map[string]string {
 	}
 
 	return headers
+}
+
+// GetGenericHeaders 获取通用 HTTP 请求的 headers（用于代理）
+func (g *HeaderGenerator) GetGenericHeaders(targetURL string) map[string]string {
+	// 从 URL 提取域名用于 Referer
+	referer := "https://www.google.com/"
+	if strings.HasPrefix(targetURL, "https://") {
+		if idx := strings.Index(targetURL[8:], "/"); idx > 0 {
+			domain := targetURL[:8+idx]
+			referer = domain + "/"
+		}
+	}
+
+	return map[string]string{
+		"User-Agent":         g.profile.UserAgent,
+		"sec-ch-ua":          g.getSecChUa(),
+		"sec-ch-ua-platform": fmt.Sprintf(`"%s"`, g.profile.Platform),
+		"sec-ch-ua-mobile":   "?0",
+		"sec-ch-ua-arch":     fmt.Sprintf(`"%s"`, g.profile.Architecture),
+		"sec-ch-ua-bitness":  fmt.Sprintf(`"%s"`, g.profile.Bitness),
+		"Referer":            referer,
+		"Accept":             "*/*",
+		"Accept-Language":    "en-US,en;q=0.9",
+	}
 }
 
 // GetScriptHeaders 获取脚本请求的 headers

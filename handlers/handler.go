@@ -26,8 +26,11 @@ import (
 	"cursor2api-go/models"
 	"cursor2api-go/services"
 	"cursor2api-go/utils"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -313,6 +316,87 @@ func (h *Handler) Health(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":    "ok",
 		"timestamp": time.Now().Unix(),
-		"version":   "go-1.0.0",
+			"version":   "go-1.0.0",
 	})
+}
+
+// ProxyRequest 通用 HTTP 代理处理器
+func (h *Handler) ProxyRequest(c *gin.Context) {
+	// 获取目标 URL
+	targetPath := strings.TrimPrefix(c.Param("path"), "/")
+	if targetPath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing target URL"})
+		return
+	}
+
+	// 构建完整的目标 URL
+	targetURL := c.Query("url")
+	if targetURL == "" {
+		// 从路径提取目标
+		// 格式: /proxy/https://example.com/api
+		if strings.HasPrefix(targetPath, "http://") || strings.HasPrefix(targetPath, "https://") {
+			targetURL = targetPath
+		} else {
+			targetURL = "https://" + targetPath
+		}
+	}
+
+	// 解析目标 URL
+	parsedURL, err := url.Parse(targetURL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid target URL: " + err.Error()})
+		return
+	}
+
+	// 使用 Cursor 服务的 HTTP 客户端和头部生成器（带有浏览器指纹）
+	client := h.cursorService.GetClient()
+	headerGenerator := h.cursorService.GetHeaderGenerator()
+
+	headers := headerGenerator.GetGenericHeaders(targetURL)
+
+	// 创建代理请求
+	proxyReq, err := http.NewRequest(c.Request.Method, parsedURL.String(), c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create proxy request: " + err.Error()})
+		return
+	}
+
+	// 复制原始请求头
+	for key, values := range c.Request.Header {
+		// 跳过一些不应该转发的头
+		if key == "Host" || key == "Connection" || key == "Content-Length" {
+			continue
+		}
+		// 覆盖浏览器指纹相关的头
+		if key == "User-Agent" || key == "Referer" || strings.HasPrefix(key, "sec-ch-ua") {
+			continue
+		}
+		for _, value := range values {
+			proxyReq.Header.Add(key, value)
+		}
+	}
+
+	// 添加浏览器指纹头
+	for key, value := range headers {
+		proxyReq.Header.Set(key, value)
+	}
+
+	// 转发请求
+	resp, err := client.Do(proxyReq)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "proxy request failed: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	// 复制响应头
+	for key, values := range resp.Header {
+		c.Header(key, values[0])
+	}
+
+	// 复制响应状态码
+	c.Status(resp.StatusCode)
+
+	// 流式复制响应体
+	io.Copy(c.Writer, resp.Body)
 }

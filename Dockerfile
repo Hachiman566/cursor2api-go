@@ -23,8 +23,12 @@ RUN HTTP_PROXY="" HTTPS_PROXY="" http_proxy="" https_proxy="" \
 # 运行阶段 - 使用 Debian 基础镜像获得更好的 TLS 支持
 FROM node:20-slim
 
-# 安装 ca-certificates
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+# 安装 ca-certificates（带重试机制）
+RUN set -e; \
+    HTTP_PROXY="" HTTPS_PROXY="" http_proxy="" https_proxy="" \
+    apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
 # 创建非 root 用户 (不指定特定 UID)
 RUN useradd -m appuser

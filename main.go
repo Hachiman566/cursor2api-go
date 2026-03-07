@@ -112,6 +112,9 @@ func setupRoutes(router *gin.Engine, handler *handlers.Handler) {
 		v1.POST("/messages", middleware.AnthropicAuthRequired(), handler.AnthropicMessages)
 	}
 
+	// 通用代理路由（用于 Skill、WebSearch 等工具）
+	router.Any("/proxy/*path", handler.ProxyRequest)
+
 	// 静态文件服务（如果需要）
 	router.Static("/static", "./static")
 }

@@ -56,6 +56,16 @@ type CursorService struct {
 	headerGenerator *utils.HeaderGenerator
 }
 
+// GetClient 获取 HTTP 客户端（用于代理请求）
+func (s *CursorService) GetClient() *req.Client {
+	return s.client
+}
+
+// GetHeaderGenerator 获取头部生成器（用于代理请求）
+func (s *CursorService) GetHeaderGenerator() *utils.HeaderGenerator {
+	return s.headerGenerator
+}
+
 // NewCursorService creates a new service instance.
 func NewCursorService(cfg *config.Config) *CursorService {
 	mainJS, err := os.ReadFile(filepath.Join("jscode", "main.js"))
