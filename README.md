@@ -315,6 +315,228 @@ claude config set --global apiBaseUrl http://localhost:8002
 
 > **注意**: 需要在 `MODELS` 中添加 `claude-sonnet-4.6` 等模型名，否则会返回模型不存在错误。
 
+
+
+### 通用 HTTP 代理（用于 Skill 工具）
+
+本服务提供通用 HTTP 代理功能，可将任意 HTTP 请求通过浏览器指纹伪装转发：
+
+```bash
+# 代理 GET 请求
+curl "http://localhost:8002/proxy/https://httpbin.org/get"
+
+# 代理 POST 请求
+curl -X POST "http://localhost:8002/proxy/https://httpbin.org/post" \
+  -H "Content-Type: application/json" \
+  -d '{"key": "value"}'
+
+# 使用查询参数指定 URL
+curl "http://localhost:8002/proxy/some-path?url=https://example.com/api"
+```
+
+**特性**:
+- 自动添加浏览器指纹头部（User-Agent、Sec-Ch-Ua-* 等）
+- 支持所有 HTTP 方法（GET、POST、PUT、DELETE 等）
+- 使用与 Cursor API 相同的 TLS 指纹模拟
+- 转发响应状态码、头部和内容
+
+**使用场景**:
+- 让 Skill 工具（如 web-search）通过代理访问受限网站
+- 需要浏览器指纹伪装的 API 请求
+- 绕过基于 User-Agent 的访问限制
+  -e DEBUG=false \
+  -e MODELS="claude-3.5-sonnet,claude-sonnet-4-6,claude-sonnet-4.6,gpt-4o" \
+  -e TIMEOUT=60 \
+  cursor2api-go
+```
+
+**清除代理**（避免容器内无法访问宿主机代理）:
+```bash
+docker run -d \
+  --name cursor2api-go \
+  --restart unless-stopped \
+  -p 8002:8002 \
+  -e HTTP_PROXY="" \
+  -e HTTPS_PROXY="" \
+  -e http_proxy="" \
+  -e https_proxy="" \
+  -e MODELS="claude-3.5-sonnet,claude-sonnet-4-6,claude-sonnet-4.6,gpt-4o" \
+  cursor2api-go
+```
+
+**常用命令**:
+```bash
+# 查看日志
+docker logs -f cursor2api-go
+
+# 停止容器
+docker stop cursor2api-go
+
+# 启动已停止的容器
+docker start cursor2api-go
+
+# 删除并重新创建
+docker rm -f cursor2api-go && docker run -d ...
+
+# 查看运行状态
+docker ps | grep cursor2api-go
+```
+
+**环境变量说明**:
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `PORT` | `8002` | 服务端口 |
+| `API_KEY` | `0000` | API 认证密钥 |
+| `DEBUG` | `false` | 调试模式 |
+| `MODELS` | `claude-sonnet-4-6` | 支持的模型列表（逗号分隔） |
+| `TIMEOUT` | `60` | 请求超时时间（秒） |
+| `HTTP_PROXY` | - | HTTP 代理（容器内通常需清空） |
+| `HTTPS_PROXY` | - | HTTPS 代理（容器内通常需清空） |
+
+> **注意**: 如果宿主机使用了本地代理（如 Clash、V2Ray 监听在 `127.0.0.1:7890`），容器内无法访问该代理。建议设置 `HTTP_PROXY=""` 等环境变量让容器直连外网，或配置代理监听 `0.0.0.0` 并使用 `host.docker.internal:7890`。
+
+### Docker Compose 部署（推荐用于生产环境）
+
+1. **使用 docker-compose.yml**:
+```bash
+# 启动服务
+docker-compose up -d
+
+# 停止服务
+docker-compose down
+
+# 查看日志
+docker-compose logs -f
+```
+
+2. **自定义配置**:
+修改 `docker-compose.yml` 文件中的环境变量以满足您的需求：
+- 修改 `API_KEY` 为安全的密钥
+- 根据需要调整 `MODELS`、`TIMEOUT` 等配置
+- 更改暴露的端口
+
+### 系统服务部署（Linux）
+
+1. **编译并移动二进制文件**:
+```bash
+go build -o cursor2api-go
+sudo mv cursor2api-go /usr/local/bin/
+sudo chmod +x /usr/local/bin/cursor2api-go
+```
+
+2. **创建系统服务文件** `/etc/systemd/system/cursor2api-go.service`:
+```ini
+[Unit]
+Description=Cursor2API Service
+After=network.target
+
+[Service]
+Type=simple
+User=your-user
+WorkingDirectory=/home/your-user/cursor2api-go
+ExecStart=/usr/local/bin/cursor2api-go
+Restart=always
+Environment=API_KEY=your-secret-key
+Environment=PORT=8002
+
+[Install]
+WantedBy=multi-user.target
+```
+
+3. **启动服务**:
+```bash
+# 重载 systemd 配置
+sudo systemctl daemon-reload
+
+# 启用开机自启
+sudo systemctl enable cursor2api-go
+
+# 启动服务
+sudo systemctl start cursor2api-go
+
+# 查看状态
+sudo systemctl status cursor2api-go
+```
+
+## 📡 API 使用
+
+### 获取模型列表
+
+```bash
+curl -H "Authorization: Bearer 0000" http://localhost:8002/v1/models
+```
+
+### 非流式聊天
+
+```bash
+curl -X POST http://localhost:8002/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer 0000" \
+  -d '{
+    "model": "claude-sonnet-4.6",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "stream": false
+  }'
+```
+
+### 流式聊天
+
+```bash
+curl -X POST http://localhost:8002/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer 0000" \
+  -d '{
+    "model": "claude-sonnet-4.6",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "stream": true
+  }'
+```
+
+### Anthropic 格式接口（供 Claude Code 使用）
+
+本服务同时兼容 Anthropic API 格式，可直接配置 Claude Code 使用：
+
+```bash
+# 非流式请求
+curl -X POST http://localhost:8002/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: 0000" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-sonnet-4.6",
+    "max_tokens": 100,
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+
+# 流式请求
+curl -X POST http://localhost:8002/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: 0000" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-sonnet-4.6",
+    "max_tokens": 100,
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "stream": true
+  }'
+```
+
+**Claude Code 配置**:
+```bash
+export ANTHROPIC_API_KEY=0000
+export ANTHROPIC_BASE_URL=http://localhost:8002
+claude
+```
+
+或使用配置命令（永久生效）:
+```bash
+claude config set --global apiKey 0000
+claude config set --global apiBaseUrl http://localhost:8002
+```
+
+> **注意**: 需要在 `MODELS` 中添加 `claude-sonnet-4.6` 等模型名，否则会返回模型不存在错误。
+
 ### 在第三方应用中使用
 
 在任何支持自定义 OpenAI API 的应用中（如 ChatGPT Next Web、Lobe Chat 等）：
